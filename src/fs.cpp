@@ -30,17 +30,78 @@ oks::outcome own(const char* path, oks::kstat* st) {
 }
 bool same_node(const oks::kstat& a, const oks::kstat& b) { return a.st_dev == b.st_dev && a.st_ino == b.st_ino; }
 
-// The working directory's name. No call of these systems answers it: the name
-// the environment gives (PWD) is taken when it names the same directory as `.',
-// and otherwise the name is `.', which every operation still resolves.
+// The working directory's name. No call of these systems answers it. The name
+// the environment gives (PWD) is taken when it names the same directory as `.':
+// a program started by a shell has it. Otherwise the name is found as the
+// systems' own `getcwd' finds it, a level at a time: the entry of the directory
+// above that is the same node as the one below. Nodes are compared as `stat'
+// answers them for both, so the comparison does not depend on how a listing
+// states a node's number. Where a level cannot be read the name is `.', which
+// every operation still resolves.
+bool find_here(char* out, unsigned long cap) {
+    char up[oks::kPath];                 // `.', `./..', `./../..', ...
+    char found[oks::kPath];              // the name, assembled from its end
+    unsigned long at = sizeof found - 1, len = 1;
+    found[at] = 0;
+    up[0] = '.'; up[1] = 0;
+    for (int level = 0; level < 256; ++level) {
+        oks::kstat below{}, above{};
+        if (len + 3 + 256 >= sizeof up) return false;
+        if (oks::call(oks::nr::stat, oks::arg(up), oks::arg(&below)).failed()) return false;
+        oks::copy(up + len, "/..", 4); len += 3;
+        if (oks::call(oks::nr::stat, oks::arg(up), oks::arg(&above)).failed()) return false;
+        if (same_node(below, above)) {                       // the root is its own parent
+            if (found[at] == 0) { if (at == 0) return false; found[--at] = '/'; }
+            const unsigned long n = sizeof found - at;       // with the terminator
+            if (n > cap) return false;
+            oks::copy(out, found + at, n);
+            return true;
+        }
+        const auto dir = oks::call(oks::nr::open, oks::arg(up), oks::O_RDONLY, 0);
+        if (dir.failed()) return false;
+        const int fd = static_cast<int>(dir.value);
+        bool have = false;
+        char buf[1024];
+        while (!have) {
+            const auto r = oks::call(oks::nr::getdents, fd, oks::arg(buf), sizeof buf);
+            if (r.error == oks::EINTR) continue;
+            if (r.failed() || r.value <= 0) break;
+            for (long pos = 0; pos < r.value && !have;) {
+                auto* e = reinterpret_cast<oks::kdirent*>(buf + pos);
+                if (e->d_reclen == 0) break;
+                pos += e->d_reclen;
+                const unsigned long n = oks::length(e->d_name);
+                if (n == 0 || n > 255) continue;
+                if ((n == 1 && e->d_name[0] == '.') || (n == 2 && e->d_name[0] == '.' && e->d_name[1] == '.')) continue;
+                up[len] = '/'; oks::copy(up + len + 1, e->d_name, n + 1);
+                oks::kstat st{};
+                const bool is = !own(up, &st).failed() && kind_of(st.st_mode) == kal_node_directory && same_node(st, below);
+                up[len] = 0;
+                if (!is) continue;
+                if (at < n + 1) break;
+                at -= n; oks::copy(found + at, e->d_name, n);
+                found[--at] = '/';
+                have = true;
+            }
+        }
+        oks::call(oks::nr::close, fd);
+        if (!have) return false;
+    }
+    return false;
+}
 void name_here() {
     g_here[0] = '.'; g_here[1] = 0;
     const char* pwd = oks::variable("PWD", 3);
-    if (!pwd || pwd[0] != '/' || oks::length(pwd) >= sizeof g_here) return;
-    oks::kstat a{}, b{};
-    if (oks::call(oks::nr::stat, oks::arg("."), oks::arg(&a)).failed()) return;
-    if (oks::call(oks::nr::stat, oks::arg(pwd), oks::arg(&b)).failed()) return;
-    if (same_node(a, b)) oks::copy(g_here, pwd, oks::length(pwd) + 1);
+    if (pwd && pwd[0] == '/' && oks::length(pwd) < sizeof g_here) {
+        oks::kstat a{}, b{};
+        if (!oks::call(oks::nr::stat, oks::arg("."), oks::arg(&a)).failed()
+            && !oks::call(oks::nr::stat, oks::arg(pwd), oks::arg(&b)).failed() && same_node(a, b)) {
+            oks::copy(g_here, pwd, oks::length(pwd) + 1);
+            return;
+        }
+    }
+    char name[oks::kPath];
+    if (find_here(name, sizeof name)) oks::copy(g_here, name, oks::length(name) + 1);
 }
 void ready() {
     if (g_ready) return;

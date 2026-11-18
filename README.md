@@ -45,7 +45,9 @@ a call, the operation takes the older one or reports `not supported`:
 | `openkal.process` | Written (`src/unclaimed/process.cpp`) and not claimed: where it was run, the replacement of an image leaves the emulation, so the suite's observations of a started program cannot be made |
 | `openkal.exec`, `timeout`, `map`, `region`, `space`, `net`, `datagram`, `prof`, `debug` | Outside 0.1 |
 
-Stated limits: a file's position is a word (a file ends before 2 GiB); the wall clock is
+Stated limits: the working directory's name is the environment's (`PWD`) when that names the
+same directory, and is otherwise found a level at a time, as the systems' own `getcwd` finds it;
+a file's position is a word (a file ends before 2 GiB); the wall clock is
 in seconds (`time`) and the monotonic clock in ticks (`times`, 10 ms); a directory handle
 is a path, since no call takes a directory's descriptor and a name beneath it; a lock of
 these systems belongs to the program and not to the open file, so `KAL_FS_PROP_LOCKS` is
