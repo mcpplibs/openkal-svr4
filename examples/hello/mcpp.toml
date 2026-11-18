@@ -11,6 +11,6 @@ kind = "bin"
 main = "src/main.cpp"
 
 [target.i686-svr4-musl]
-platform = "openkal-platform@0.29.3"
+platform = "openkal-platform@0.30.0"
 # The runner is an emulation of the interface (ibcs-us) and is enabled by the project.
 runner   = { enabled = true }
