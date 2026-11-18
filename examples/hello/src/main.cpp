@@ -35,5 +35,7 @@ int main(int argc, char** argv) {
     std::println("read: {} ({} bytes)", line, fs::file_size(directory / "second.txt"));
     std::println("removed: {}", fs::remove_all(directory));
     std::println("system: {}", std::getenv("PATH") != nullptr ? "has PATH" : "no PATH");
+    // The working directory has a name of its own, whether or not the environment gives one.
+    std::println("here: {}", fs::current_path().is_absolute() ? "absolute" : "relative");
     return 7;
 }

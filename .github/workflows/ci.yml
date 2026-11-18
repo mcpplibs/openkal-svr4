@@ -90,4 +90,9 @@ jobs:
             grep -qx 'listed: \["one.txt", "second.txt", "three.txt"\]' out.txt
             grep -qx 'read: two.txt (8 bytes)' out.txt
             grep -qx 'removed: 4' out.txt
+            grep -qx 'here: absolute' out.txt
           done
+          # Started elsewhere and with no PWD: the working directory's name is found, not given.
+          program="$(find "$PWD/target/i686-svr4-musl" -path '*bin/hello' -type f | head -1)"
+          mkdir -p "$RUNNER_TEMP/elsewhere/a/b"
+          (cd "$RUNNER_TEMP/elsewhere/a/b" && env -u PWD unshare -Ur "$IBCS_US" "$program" > out.txt || true; cat out.txt; grep -qx 'here: absolute' out.txt)
