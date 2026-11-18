@@ -1,0 +1,51 @@
+[package]
+namespace   = "mcpplibs"
+name        = "openkal-svr4"
+version     = "0.1.0"
+description = "An implementation of openkal for UNIX System V Release 4 and its descendants on i386, written on the kernel's own system-call interface."
+license     = "Apache-2.0"
+authors     = ["mcpplibs"]
+repo        = "https://github.com/mcpplibs/openkal-svr4"
+
+provides    = ["mcpp:kernel-abi=openkal"]
+
+# WHICH INTERFACES THIS IMPLEMENTATION PROVIDES, AND NO OTHER. An interface it
+# does not provide is absent: it is not in this list and none of its names is
+# defined (openkal SPEC.md clause 6.1).
+#
+# Absent in 0.1: openkal.task (Release 4.0's kernel has no threads; a program
+# that needs them is refused when it is planned), openkal.random (it has no
+# random device), openkal.process (src/unclaimed/process.cpp: written, and not
+# claimed until it is run where the replacement of an image is the system's
+# own), openkal.exec, openkal.timeout, openkal.map, openkal.region,
+# openkal.space, openkal.net, openkal.datagram, openkal.prof and openkal.debug.
+[kernel-abi]
+provides-interfaces = [
+    "openkal.abort",
+    "openkal.stream",
+    "openkal.memory",
+    "openkal.env",
+    "openkal.time",
+    "openkal.fs",
+    "openkal.terminal",
+]
+
+[dependencies]
+# Every patch release of the specification's minor version (openkal clause 8).
+openkal = "^0.25.0"
+
+[build]
+sources = ["src/*.cpp", "src/*.S"]
+flags = [
+  { glob = "src/**", cxxflags = ["-fno-exceptions", "-fno-rtti", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"] },
+]
+
+[features]
+default = []
+
+# Whether this implementation is the whole of the program's environment. It
+# always is: a program of these rows links no file of the system, so nothing
+# else has received control. The feature exists because the statement is the
+# consumer's, as for the other implementations: this one begins the program
+# (`_start') only where it is selected.
+standalone = { defines = ["OKS_STANDALONE"] }

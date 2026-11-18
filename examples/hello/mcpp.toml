@@ -1,0 +1,16 @@
+# A program of UNIX System V Release 4 (i386) in C++23 over openkal-svr4: sorts its arguments,
+# throws and catches an exception across a frame, makes, renames, lists and removes files, and
+# returns 7.
+#   mcpp run --target i686-svr4-musl -- b a
+[package]
+name    = "hello"
+version = "0.1.0"
+
+[targets.hello]
+kind = "bin"
+main = "src/main.cpp"
+
+[target.i686-svr4-musl]
+platform = "openkal-platform@0.29.3"
+# The runner is an emulation of the interface (ibcs-us) and is enabled by the project.
+runner   = { enabled = true }
