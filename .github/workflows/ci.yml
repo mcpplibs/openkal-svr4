@@ -1,0 +1,98 @@
+name: CI
+
+# What this workflow asserts about openkal-svr4.
+#
+#   conformance  the specification's suite, built for i686-svr4-musl with this repository as the
+#                row's `kernel-abi' layer (tools/row.sh; openkal-musl and openkal-llvm-runtime at
+#                their branch of this branch's name when they have one, else their main), run
+#                under ibcs-us as each of the three interfaces a static ELF is run as:
+#                UnixWare 7, Solaris and OpenServer 5. The suite conforms in every observation
+#                made, and the number of observations that held is the same under the three.
+#   programs     examples/hello through `mcpp run', unoptimised and optimised: its arguments,
+#                an exception across a frame, files made, renamed, listed and removed, status 7.
+#
+# The runs are under an emulation of the interface on Linux x86_64 (README, "Where it was
+# run"); none is on a System V kernel.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  XLINGS_VERSION: v2026.10.26.1
+  XLINGS_NON_INTERACTIVE: '1'
+  MCPP_VERSION: 2026.11.18.1
+  IBCS_US_VERSION: 4.3-1
+  IBCS_US_SHA256: 4dd3d690b4f397e8a3f11162d9de0db7e03c117b1a4410241e7d01adabb82409
+
+jobs:
+  row:
+    name: i686-svr4-musl (built on Linux x86_64, run under ibcs-us)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install xlings and mcpp
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/openxlings/xlings/main/tools/other/quick_install.sh | bash -s "$XLINGS_VERSION"
+          echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
+      - name: mcpp and LLVM
+        run: |
+          xlings update
+          xlings install "mcpp@$MCPP_VERSION" -y -g
+          mcpp self config --mirror GLOBAL
+          mcpp toolchain install llvm 23.1.3
+      - name: ibcs-us
+        run: |
+          name="ibcs-us-$IBCS_US_VERSION-linux-x64"
+          curl -fsSL --retry 5 -o "$RUNNER_TEMP/$name.tar.gz" \
+            "https://github.com/mcpp-community/ibcs-us/releases/download/$IBCS_US_VERSION/$name.tar.gz"
+          echo "$IBCS_US_SHA256  $RUNNER_TEMP/$name.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$name.tar.gz" -C "$RUNNER_TEMP"
+          echo "IBCS_US=$RUNNER_TEMP/$name/bin/ibcs-us" >> "$GITHUB_ENV"
+          if ! unshare -Ur true 2>/dev/null; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          unshare -Ur true
+      - name: The specification, the C library and the C++ run-time
+        run: |
+          branch="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+          git clone --quiet --depth 1 https://github.com/mcpplibs/openkal.git .spec
+          for repo in openkal-musl openkal-llvm-runtime; do
+            if git ls-remote --exit-code --heads "https://github.com/mcpplibs/$repo.git" "$branch" >/dev/null 2>&1; then ref="$branch"; else ref=main; fi
+            echo "$repo at $ref"
+            git clone --quiet --depth 1 --branch "$ref" "https://github.com/mcpplibs/$repo.git" ".$repo"
+          done
+          bash tools/row.sh "$RUNNER_TEMP/row" .openkal-musl .openkal-llvm-runtime "$IBCS_US"
+      - name: Conformance under the three interfaces
+        run: |
+          for interface in per_uw7 per_solaris per_osr5; do
+            bash tools/run-conformance.sh .spec "$RUNNER_TEMP/row" "$IBCS_US" "$interface" | tee "$interface.log"
+            grep -q '^the implementation conforms in every observation made' "$interface.log" \
+              || { echo "::error::the suite does not conform under $interface"; exit 1; }
+            grep '^observations:' "$interface.log" > "$interface.count"
+            { echo "### openkal-svr4 conformance under ibcs-us ($interface)"; echo '```'; grep -E '^observations|DID NOT HOLD|^the implementation' "$interface.log" | sort -u; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          done
+          cmp per_uw7.count per_solaris.count && cmp per_uw7.count per_osr5.count \
+            || { echo "::error::the three interfaces do not agree on the observations"; exit 1; }
+      - name: hello (status 7), unoptimised and optimised
+        working-directory: examples/hello
+        run: |
+          sed -i "s|^platform = .*|platform = { path = \"$RUNNER_TEMP/row\" }|" mcpp.toml
+          for profile in "" --release; do
+            set +e; mcpp run --target i686-svr4-musl $profile -- zeta alpha > out.txt; rc=$?; set -e
+            cat out.txt
+            [ "$rc" = 7 ] || { echo "::error::hello ($profile) ended with $rc, not 7"; exit 1; }
+            grep -qx 'arguments: \["alpha", "zeta"\]' out.txt
+            grep -qx 'caught: an exception crossed a frame' out.txt
+            grep -qx 'listed: \["one.txt", "second.txt", "three.txt"\]' out.txt
+            grep -qx 'read: two.txt (8 bytes)' out.txt
+            grep -qx 'removed: 4' out.txt
+            grep -qx 'here: absolute' out.txt
+          done
+          # Started elsewhere and with no PWD: the working directory's name is found, not given.
+          program="$(find "$PWD/target/i686-svr4-musl" -path '*bin/hello' -type f | head -1)"
+          mkdir -p "$RUNNER_TEMP/elsewhere/a/b"
+          (cd "$RUNNER_TEMP/elsewhere/a/b" && env -u PWD unshare -Ur "$IBCS_US" "$program" > out.txt || true; cat out.txt; grep -qx 'here: absolute' out.txt)
