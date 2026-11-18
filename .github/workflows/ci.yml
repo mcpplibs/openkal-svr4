@@ -34,16 +34,11 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - name: Install xlings and mcpp
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/openxlings/xlings/main/tools/other/quick_install.sh | bash -s "$XLINGS_VERSION"
-          echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
-      - name: mcpp and LLVM
-        run: |
-          xlings update
-          xlings install "mcpp@$MCPP_VERSION" -y -g
-          mcpp self config --mirror GLOBAL
-          mcpp toolchain install llvm 23.1.3
+      - uses: mcpp-community/setup-mcpp@v1
+        with:
+          version: ${{ env.MCPP_VERSION }}
+          xlings-version: ${{ env.XLINGS_VERSION }}
+          toolchains: llvm 23.1.3
       - name: ibcs-us
         run: |
           name="ibcs-us-$IBCS_US_VERSION-linux-x64"
