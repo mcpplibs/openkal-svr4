@@ -1,7 +1,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-svr4"
-version     = "0.1.0"
+version     = "0.2.0"
 description = "An implementation of openkal for UNIX System V Release 4 and its descendants on i386, written on the kernel's own system-call interface."
 license     = "Apache-2.0"
 authors     = ["mcpplibs"]
@@ -13,7 +13,7 @@ provides    = ["mcpp:kernel-abi=openkal"]
 # does not provide is absent: it is not in this list and none of its names is
 # defined (openkal SPEC.md clause 6.1).
 #
-# Absent in 0.1: openkal.task (Release 4.0's kernel has no threads; a program
+# Absent: openkal.task (Release 4.0's kernel has no threads; a program
 # that needs them is refused when it is planned), openkal.random (it has no
 # random device), openkal.process (src/unclaimed/process.cpp: written, and not
 # claimed until it is run where the replacement of an image is the system's
@@ -32,7 +32,7 @@ provides-interfaces = [
 
 [dependencies]
 # Every patch release of the specification's minor version (openkal clause 8).
-openkal = "^0.25.0"
+openkal = "^0.26.0"
 
 [build]
 sources = ["src/*.cpp", "src/*.S"]

@@ -11,8 +11,24 @@ the program is one static ELF32 executable. The rows are a platform's
 ```toml
 [[platform.provider]]
 serves = ["i686-svr4-musl"]
-layers = { "kernel-abi" = { name = "openkal-svr4", version = "0.1.0", features = ["standalone"] } }
+layers = { "kernel-abi" = { name = "openkal-svr4", version = "0.2.0", features = ["standalone"] } }
 ```
+
+## What 0.2 changes (openkal 0.26)
+
+Nothing that a program built over this package observes: the manifest declares
+`openkal = "^0.26.0"`. What 0.26 requires is of `openkal.process`, which this package
+does not claim: a start bounded by the environment alone (clause 7.6) and a unit claimed
+only where a reference can be made (clause 7.18). The arguments and the variables a
+program receives are read from the vectors the kernel gave it, where they lie, so no
+table bounds their number or their length.
+
+The source kept for `openkal.process` (`src/unclaimed/process.cpp`, not built) is held to
+the same clauses for the day it is claimed: it allocates both vectors of a start at their
+measured size, it answers `kal_err_not_supported` from `kal_process_job_create` and does
+not state `KAL_PROCESS_PROP_JOB_OBSERVE`, and the kernel's refusal of a start for its
+size (`E2BIG`) is now `kal_err_no_space` in the translation every source shares
+(`src/common.h`), where it was `kal_err_io`. None of this has been run.
 
 ## What it is written on
 

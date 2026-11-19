@@ -3,8 +3,9 @@ name: CI
 # What this workflow asserts about openkal-svr4.
 #
 #   conformance  the specification's suite, built for i686-svr4-musl with this repository as the
-#                row's `kernel-abi' layer (tools/row.sh; openkal-musl and openkal-llvm-runtime at
-#                their branch of this branch's name when they have one, else their main), run
+#                row's `kernel-abi' layer (tools/row.sh; the specification, openkal-musl and
+#                openkal-llvm-runtime at their branch of this branch's name when they have one,
+#                else their main; the specification by its tree, tools/run-conformance.sh), run
 #                under ibcs-us as each of the three interfaces a static ELF is run as:
 #                UnixWare 7, Solaris and OpenServer 5. The suite conforms in every observation
 #                made, and the number of observations that held is the same under the three.
@@ -54,12 +55,12 @@ jobs:
       - name: The specification, the C library and the C++ run-time
         run: |
           branch="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
-          git clone --quiet --depth 1 https://github.com/mcpplibs/openkal.git .spec
-          for repo in openkal-musl openkal-llvm-runtime; do
+          for repo in openkal openkal-musl openkal-llvm-runtime; do
             if git ls-remote --exit-code --heads "https://github.com/mcpplibs/$repo.git" "$branch" >/dev/null 2>&1; then ref="$branch"; else ref=main; fi
             echo "$repo at $ref"
             git clone --quiet --depth 1 --branch "$ref" "https://github.com/mcpplibs/$repo.git" ".$repo"
           done
+          mv .openkal .spec
           bash tools/row.sh "$RUNNER_TEMP/row" .openkal-musl .openkal-llvm-runtime "$IBCS_US"
       - name: Conformance under the three interfaces
         run: |
