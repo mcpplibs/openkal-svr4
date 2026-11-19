@@ -30,6 +30,11 @@ not state `KAL_PROCESS_PROP_JOB_OBSERVE`, and the kernel's refusal of a start fo
 size (`E2BIG`) is now `kal_err_no_space` in the translation every source shares
 (`src/common.h`), where it was `kal_err_io`. None of this has been run.
 
+**`kal_env_var_at` answers a variable's name.** 0.1 answered the whole entry,
+`NAME=value`, which `kal_env_var` does not find again; `openkal/env.h` states the name.
+The specification's suite reported the enumeration as not observed, because the first
+entry already failed, so the defect was read as an empty environment.
+
 ## What it is written on
 
 The part the systems share. The entry is the call gate (`lcall $7,$0`, `src/call.S`):

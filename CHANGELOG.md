@@ -8,6 +8,8 @@
 - `E2BIG` is `kal_err_no_space` in the shared translation (`src/common.h`), where it was
   `kal_err_io`: only `execve` answers it, which the sources built do not issue, and the
   source kept for `openkal.process` is thereby held to clause 7.6. Not run.
+- `kal_env_var_at` answers a variable's name, as `openkal/env.h` states; 0.1 answered the
+  whole entry (`NAME=value`), which `kal_env_var` does not find again.
 
 ## 0.1.0
 
