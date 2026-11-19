@@ -16,4 +16,5 @@ case "$ibcs" in */*) ibcs="$(cd "$(dirname "$ibcs")" && pwd)/$(basename "$ibcs")
 here="$(cd "$(dirname "$0")/.." && pwd)"
 sed -e "s|@SVR4@|$here|g" -e "s|@MUSL@|$musl|g" -e "s|@RUNTIME@|$runtime|g" -e "s|@IBCS@|$ibcs|g" \
   "$here/tests/row/mcpp.toml.in" > "$out/mcpp.toml"
+cp "$here/tests/row/svr4.ld" "$out/svr4.ld"
 echo "$out"
