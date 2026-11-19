@@ -59,10 +59,16 @@ of one context cannot observe.
 **On a System V kernel, once, by hand; and under an emulation of the interface, by CI.**
 
 The kernel is AT&T UNIX System V/386 Release 4.0 Version 3.0, installed in QEMU from its
-floppy set on the developer's machine (2026-11-19). The media are not free software and
-are neither held nor distributed here. The installation and the runs are scripted: QEMU
-driven through its monitor, the programs delivered as a tar archive on floppies, their
-output on the first serial line.
+floppy set (2026-11-19). The media are not free software and are neither held nor
+distributed here. The run can be repeated through xim's `svr4-disk-image` (technical
+verification only: the system installed by its own installer, with a root shell on its
+first serial line) and dirun 0.8.0, which gives a run's files on a second disk behind the
+system's own label:
+
+    dirun --profile <svr4-disk-image>/dirun.toml --emulator qemu-system-x86_64 -- ./program
+
+A project runs the row there by stating that runner for `i686-svr4-musl` (the package's
+README shows the table); the platform's own runner stays the emulation below.
 
 The emulation is [ibcs-us](https://ibcs-us.sourceforge.io/) 4.3 with corrections (below), on
 Linux x86_64, as `unshare -Ur ibcs-us <program>`. Three of its interfaces were used:
