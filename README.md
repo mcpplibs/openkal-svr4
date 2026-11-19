@@ -11,8 +11,28 @@ the program is one static ELF32 executable. The rows are a platform's
 ```toml
 [[platform.provider]]
 serves = ["i686-svr4-musl"]
-layers = { "kernel-abi" = { name = "openkal-svr4", version = "0.2.0", features = ["standalone"] } }
+layers = { "kernel-abi" = { name = "openkal-svr4", version = "0.3.0", features = ["standalone"] } }
 ```
+
+## What 0.3 adds: programs that start programs
+
+`openkal.process` and `openkal.space` are claimed. A program starts another (`fork`,
+`execve`, `wait`, `kill`: `kal_process_spawn` and its kin), waits for it, ends it, gives it
+streams, a null device or a channel (a pipe), and starts a context in a copy of its space
+(`kal_space_start`, on `fork`), over which a C library composes `fork` itself. So a shell or
+a command interpreter built for this row starts external commands. What is known of a
+program (`kal_process_info`) is its identifier, whether it has ended and its processor time
+(`times`); its start and its memory are not, and `kal_process_open_id` is not claimed. A
+start's resource preference reaches the program in `KAL_RESOURCES`, which
+`kal_env_resources` reads.
+
+The source had been written for 0.1 and kept: under the emulation the replacement of an
+image left it (below), so a started program could not be observed. It is run now on the
+System V kernel and under ibcs-us 4.3-2, where it stays. Three things it lacked were found
+by the suite and added (a handle to the program itself and what is known of a program, the
+channel, the preference), and one was corrected: the kernel's `wait` answers the status in
+its second result, and ibcs-us does so only when it is also given a place for it, as a C
+library's `wait(&status)` gives; the call now gives one.
 
 ## What 0.2 changes (openkal 0.26)
 
@@ -28,7 +48,8 @@ the same clauses for the day it is claimed: it allocates both vectors of a start
 measured size, it answers `kal_err_not_supported` from `kal_process_job_create` and does
 not state `KAL_PROCESS_PROP_JOB_OBSERVE`, and the kernel's refusal of a start for its
 size (`E2BIG`) is now `kal_err_no_space` in the translation every source shares
-(`src/common.h`), where it was `kal_err_io`. None of this has been run.
+(`src/common.h`), where it was `kal_err_io`. None of this had been run in 0.2; from 0.3 the
+source is `src/process.cpp`, built, run and claimed (above).
 
 **`kal_env_var_at` answers a variable's name.** 0.1 answered the whole entry,
 `NAME=value`, which `kal_env_var` does not find again; `openkal/env.h` states the name.
@@ -57,14 +78,13 @@ a call, the operation takes the older one or reports `not supported`:
 ## Interfaces
 
 `openkal.abort`, `openkal.stream`, `openkal.memory`, `openkal.env`, `openkal.time`,
-`openkal.fs` and `openkal.terminal`.
+`openkal.fs`, `openkal.terminal`, `openkal.process` and `openkal.space` (from 0.3).
 
 | Absent | Reason |
 |---|---|
 | `openkal.task` | Release 4.0's kernel has no threads. A program that needs them is refused when it is planned |
 | `openkal.random` | No random device; the C library's allocator is musl's own (`malloc-mallocng`) |
-| `openkal.process` | Written (`src/unclaimed/process.cpp`) and not claimed: where it was run, the replacement of an image leaves the emulation, so the suite's observations of a started program cannot be made |
-| `openkal.exec`, `timeout`, `map`, `region`, `space`, `net`, `datagram`, `prof`, `debug` | Outside 0.1 |
+| `openkal.exec`, `timeout`, `map`, `region`, `net`, `datagram`, `prof`, `debug` | Not provided |
 
 Stated limits: the working directory's name is the environment's (`PWD`) when that names the
 same directory, and is otherwise found a level at a time, as the systems' own `getcwd` finds it;
@@ -77,7 +97,7 @@ of one context cannot observe.
 
 ## Where it was run
 
-**On a System V kernel, once, by hand; and under an emulation of the interface, by CI.**
+**On a System V kernel and under an emulation of the interface, both by CI from 0.3.**
 
 The kernel is AT&T UNIX System V/386 Release 4.0 Version 3.0, installed in QEMU from its
 floppy set (2026-11-19). The media are not free software and are neither held nor
@@ -98,7 +118,8 @@ and OpenServer 5 (`per_osr5`). It has no interface of Release 4.0 itself.
 
 | What | On Release 4.0 Version 3.0 | Under each of the emulation's three interfaces |
 |---|---|---|
-| The specification's suite (openkal 0.25.3, `tests/cts`; features `env,time,fs,terminal`) | 111 observations held, 0 did not | 111 observations held, 0 did not |
+| The specification's suite, 0.3 (openkal 0.26.0, `tests/cts`; features `env,time,fs,terminal,process,space`) | 168 observations held, 0 did not (the terminal's are made: the line is a terminal) | 157 observations held, 0 did not (ibcs-us 4.3-2) |
+| The specification's suite, 0.1 (openkal 0.25.3; features `env,time,fs,terminal`) | 111 observations held, 0 did not | 111 observations held, 0 did not |
 | A C program; a C++23 program with `import std`, exceptions and `std::format` | run | run |
 | `mcpp test` | not run there | run |
 | An interpreter of 74 C sources and its batch script (files made, copied, renamed, listed, removed) | the script's output as on Linux x86_64: dev and release builds, LF and CR LF | the same |
@@ -111,26 +132,33 @@ unoptimised executables were stripped of their debugging sections, to fit a flop
 
 What the emulation shows is that a program issues the calls as the interface states them
 and gets the answers it expects; what the kernel showed is that those are its answers too,
-for the calls these programs issue. Another difference is known and handled: after `fork` the
-system gives the second program a non-zero second result, and the emulation a zero first
-result. `openkal.process` has been run on neither (below).
+for the calls these programs issue. Two more differences are known and handled: after
+`fork` the system gives the second program a non-zero second result, and the emulation a
+zero first result; and `wait` answers the status in its second result on the system, and
+under the emulation only when it is given a place for it as well.
 
 ## The runner
 
 ibcs-us 4.3 as released did not load an executable without debugging information, list a
 directory, shorten a file or change a file's mode. The one used here is built from its
 released source with seven corrections, each found by running this package's programs:
-[mcpp-community/ibcs-us](https://github.com/mcpp-community/ibcs-us), release `4.3-1`
+[mcpp-community/ibcs-us](https://github.com/mcpp-community/ibcs-us), release `4.3-2`
 (the xlings package `ibcs-us`). The host must let an unprivileged user make a user
 namespace.
 
-A program that replaces its image leaves the emulation, which hands the call to Linux:
-that is why `openkal.process` is not claimed.
+Until 4.3-2 a program that replaced its image left the emulation: ibcs-us handed the call
+to Linux, which started the file as its own program, where its first call through the
+gate faulted; that is why 0.1 and 0.2 did not claim `openkal.process`. From 4.3-2 a program
+of the interface that replaces its image is started under the emulation again.
 
 ## Checks
 
 `tools/row.sh <dir> <openkal-musl> <openkal-llvm-runtime> <ibcs-us>` writes a platform
 package that builds the row from working trees (`tests/row`), and
 `tools/run-conformance.sh <openkal> <dir> <ibcs-us> [<interface>]` builds the
-specification's suite with it and runs it. `.github/workflows/ci.yml` does both under the
-three interfaces, and runs `examples/hello` through `mcpp run`.
+specification's suite with it, a feature for each interface the manifest claims, and runs
+it; `tools/run-conformance.sh <openkal> <dir> --kernel <dirun> <svr4-disk-image>
+<qemu-system-x86_64>` runs it on the System V kernel instead, from xim's `svr4-disk-image`
+(technical verification only: the system is proprietary), in QEMU's translator.
+`.github/workflows/ci.yml` does both: under the three interfaces and on the kernel, and runs
+`examples/hello` through `mcpp run`.
