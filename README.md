@@ -56,24 +56,37 @@ of one context cannot observe.
 
 ## Where it was run
 
-**Under an emulation of the interface, not on a System V kernel.** The runner is
-[ibcs-us](https://ibcs-us.sourceforge.io/) 4.3 with corrections (below), on
+**On a System V kernel, once, by hand; and under an emulation of the interface, by CI.**
+
+The kernel is AT&T UNIX System V/386 Release 4.0 Version 3.0, installed in QEMU from its
+floppy set on the developer's machine (2026-11-19). The media are not free software and
+are neither held nor distributed here. The installation and the runs are scripted: QEMU
+driven through its monitor, the programs delivered as a tar archive on floppies, their
+output on the first serial line.
+
+The emulation is [ibcs-us](https://ibcs-us.sourceforge.io/) 4.3 with corrections (below), on
 Linux x86_64, as `unshare -Ur ibcs-us <program>`. Three of its interfaces were used:
 UnixWare 7 (`per_uw7`, what an ELF with no flags is taken as), Solaris (`per_solaris`)
 and OpenServer 5 (`per_osr5`). It has no interface of Release 4.0 itself.
 
-| What | Result |
-|---|---|
-| The specification's suite (openkal 0.25.3, `tests/cts`; features `env,time,fs,terminal`) | 111 observations held, 0 did not, under each of the three interfaces |
-| A C program, a C++23 program with `import std`, exceptions and `std::format`, `mcpp test` | run |
-| An interpreter of 74 C sources and its batch script (files made, copied, renamed, listed, removed) | the script's output as on Linux x86_64: dev and release builds, three interfaces, LF and CR LF |
+| What | On Release 4.0 Version 3.0 | Under each of the emulation's three interfaces |
+|---|---|---|
+| The specification's suite (openkal 0.25.3, `tests/cts`; features `env,time,fs,terminal`) | 111 observations held, 0 did not | 111 observations held, 0 did not |
+| A C program; a C++23 program with `import std`, exceptions and `std::format` | run | run |
+| `mcpp test` | not run there | run |
+| An interpreter of 74 C sources and its batch script (files made, copied, renamed, listed, removed) | the script's output as on Linux x86_64: dev and release builds, LF and CR LF | the same |
 
-What this shows is that a program issues the calls as the interface states them and gets
-the answers it expects. It does not show the program on a System V kernel: that needs the
-system's own media in a machine emulator, which are not free to distribute, and has not
-been done. One difference between the two is already known and handled: after `fork` the
+One difference between the kernel and the emulation was found by the run and is the row's
+since openkal-platform 0.30.1: the kernel kills a static executable that has a `PT_PHDR`
+entry and no `PT_INTERP` one, which a link writes by default, so the row's link states the
+program headers (`tests/row/svr4.ld` here). The emulation accepts either. On the kernel the
+unoptimised executables were stripped of their debugging sections, to fit a floppy.
+
+What the emulation shows is that a program issues the calls as the interface states them
+and gets the answers it expects; what the kernel showed is that those are its answers too,
+for the calls these programs issue. Another difference is known and handled: after `fork` the
 system gives the second program a non-zero second result, and the emulation a zero first
-result.
+result. `openkal.process` has been run on neither (below).
 
 ## The runner
 

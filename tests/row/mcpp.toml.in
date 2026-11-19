@@ -30,5 +30,7 @@ serves = ["i686-svr4-musl"]
 base   = "none"
 hosted = true
 layers = { "kernel-abi" = { path = "@SVR4@", features = ["standalone"] }, compiler-runtime = { path = "@RUNTIME@" }, "c++-abi" = { path = "@RUNTIME@" }, c-abi = { path = "@MUSL@", default-features = false, features = ["posix", "malloc-mallocng"] } }
-link   = { driver = "lld", flags = ["-static", "-z", "norelro", "--gc-sections", "--eh-frame-hdr"] }
+# The program headers are stated (svr4.ld, as openkal-platform 0.30.1 states them): the kernel of
+# Release 4.0 kills a static program that has PT_PHDR.
+link   = { driver = "lld", script = "svr4.ld", flags = ["-static", "-z", "norelro", "--gc-sections", "--eh-frame-hdr"] }
 runner = { cmd = ["unshare", "-Ur", "@IBCS@", "{}"], host = "any", hosts = ["linux-x86_64"] }
