@@ -18,6 +18,10 @@ inline int translate(word e) {
         case 0:            return kal_ok;
         case EAGAIN:       return kal_err_again;
         case ENOMEM:       return kal_err_no_memory;
+        // E2BIG: a start whose arguments and environment exceed what the
+        // kernel admits (openkal 0.26, clause 7.6). Only `execve' answers it,
+        // which the sources built issue nowhere (unclaimed/process.cpp).
+        case E2BIG:
         case ENOSPC:       return kal_err_no_space;
         case EACCES:
         case EPERM:

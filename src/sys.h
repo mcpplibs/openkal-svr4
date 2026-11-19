@@ -46,7 +46,7 @@ constexpr word exit = 1, fork = 2, read = 3, write = 4, open = 5, close = 6, wai
 }
 
 namespace abi {
-constexpr int EPERM = 1, ENOENT = 2, ESRCH = 3, EINTR = 4, ENOEXEC = 8, EBADF = 9, ECHILD = 10, EAGAIN = 11,
+constexpr int EPERM = 1, ENOENT = 2, ESRCH = 3, EINTR = 4, E2BIG = 7, ENOEXEC = 8, EBADF = 9, ECHILD = 10, EAGAIN = 11,
               ENOMEM = 12, EACCES = 13, EFAULT = 14, EEXIST = 17, ENOTDIR = 20, EISDIR = 21, EINVAL = 22,
               ENOTTY = 25, ENOSPC = 28, EROFS = 30, EPIPE = 32, ENAMETOOLONG = 78, ENOSYS = 89, ELOOP = 90,
               ENOTEMPTY = 93, EOPNOTSUPP = 122, ECONNRESET = 130;

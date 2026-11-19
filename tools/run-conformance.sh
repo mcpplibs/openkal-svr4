@@ -18,6 +18,12 @@ unshare -Ur true 2>/dev/null || { echo "this host does not let an unprivileged u
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 cp -R "$spec/tests/cts" "$work/conformance"
 rm -rf "$work/conformance/target"
+# The specification by its tree, for every package of the build that names it: the suite, this
+# implementation and the C library are then examined against the specification as written there,
+# whichever version each manifest names.
+sed "s|^openkal = .*$|openkal = { path = \"$spec\", override = true }|" "$work/conformance/mcpp.toml" > "$work/conformance/mcpp.toml.next"
+mv "$work/conformance/mcpp.toml.next" "$work/conformance/mcpp.toml"
+grep -q "^openkal = { path = \"$spec\"" "$work/conformance/mcpp.toml" || { echo "the suite does not name the specification" >&2; exit 2; }
 printf '\n[target.i686-svr4-musl]\nplatform = { path = "%s" }\n' "$platform" >> "$work/conformance/mcpp.toml"
 cd "$work/conformance"
 mcpp build --target i686-svr4-musl --features env,time,fs,terminal

@@ -151,7 +151,13 @@ kal_uintptr kal_env_var_count(void) {
 kal_intptr kal_env_var_at(kal_uintptr i, char* out, kal_uintptr cap) {
     kal_uintptr n = 0;
     for (char** e = oks::g_envp; e && *e; ++e, ++n)
-        if (n == i) return oks::put(*e, oks::length(*e), out, cap);
+        if (n == i) {
+            // The NAME, which `kal_env_var' is then asked by (openkal/env.h): 0.1 answered the
+            // whole entry, which no enquiry finds again.
+            unsigned long k = 0;
+            while ((*e)[k] && (*e)[k] != '=') ++k;
+            return oks::put(*e, k, out, cap);
+        }
     return -kal_err_invalid;
 }
 // No call of these systems names the image a program was started from, and a
