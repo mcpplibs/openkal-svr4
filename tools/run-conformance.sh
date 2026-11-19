@@ -1,20 +1,34 @@
 #!/usr/bin/env bash
 # THE SPECIFICATION'S SUITE ON `i686-svr4-musl': built from the specification's
 # working tree with the platform given (tools/row.sh writes one whose
-# `kernel-abi' layer is this repository), and run under ibcs-us.
+# `kernel-abi' layer is this repository), with a feature for every interface
+# this implementation claims (mcpp.toml), and run under ibcs-us or on the
+# System V kernel.
 #
 #   run-conformance.sh <openkal> <platform> <ibcs-us> [<interface>]
+#   run-conformance.sh <openkal> <platform> --kernel <dirun> <svr4-disk-image> <qemu-system-x86_64>
 #
-# <interface> is one of ibcs-us's (per_uw7, per_solaris, per_osr5); unset, the
-# emulation's own choice for the executable. ibcs-us is started in a user
-# namespace, where it has the identity it asks for.
+# Under ibcs-us: <interface> is one of its (per_uw7, per_solaris, per_osr5);
+# unset, the emulation's own choice for the executable. ibcs-us is started in a
+# user namespace, where it has the identity it asks for.
+#
+# On the kernel: AT&T UNIX System V/386 Release 4.0 Version 3.0 in QEMU, the
+# image of xim's svr4-disk-image (TECHNICAL VERIFICATION ONLY: the system is
+# proprietary) booted by dirun 0.8.0 or later; QEMU translates (TCG), which a
+# GitHub-hosted runner needs (under KVM there the kernel stopped while booting).
 set -euo pipefail
 spec="$(cd "${1:?the specification}" && pwd)"
 platform="$(cd "${2:?the platform}" && pwd)"
-ibcs="$(cd "$(dirname "${3:?the ibcs-us to run under}")" && pwd)/$(basename "$3")"
-interface="${4:-}"
 here="$(cd "$(dirname "$0")/.." && pwd)"
-unshare -Ur true 2>/dev/null || { echo "this host does not let an unprivileged user make a user namespace" >&2; exit 2; }
+if [ "${3:-}" = --kernel ]; then
+  mode=kernel
+  dirun="${4:?dirun}"; image="$(cd "${5:?the svr4-disk-image package}" && pwd)"; qemu="${6:?qemu-system-x86_64}"
+else
+  mode=ibcs
+  ibcs="$(cd "$(dirname "${3:?the ibcs-us to run under}")" && pwd)/$(basename "$3")"
+  interface="${4:-}"
+  unshare -Ur true 2>/dev/null || { echo "this host does not let an unprivileged user make a user namespace" >&2; exit 2; }
+fi
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 cp -R "$spec/tests/cts" "$work/conformance"
 rm -rf "$work/conformance/target"
@@ -26,10 +40,22 @@ mv "$work/conformance/mcpp.toml.next" "$work/conformance/mcpp.toml"
 grep -q "^openkal = { path = \"$spec\"" "$work/conformance/mcpp.toml" || { echo "the suite does not name the specification" >&2; exit 2; }
 printf '\n[target.i686-svr4-musl]\nplatform = { path = "%s" }\n' "$platform" >> "$work/conformance/mcpp.toml"
 cd "$work/conformance"
-mcpp build --target i686-svr4-musl --features env,time,fs,terminal
+# The interfaces this implementation claims, and the suite's features for them: one a name, but
+# for the three of the core set (abort, stream, memory), which every build of the suite observes.
+provides="$(awk '/^[[:space:]]*provides-interfaces[[:space:]]*=/ {on=1} on {line=line $0; if ($0 ~ /\]/) on=0} END {gsub(/.*\[/,"",line); gsub(/\].*/,"",line); gsub(/[" \t]/,"",line); gsub(/,$/,"",line); gsub(/,/,";",line); print line}' "$here/mcpp.toml")"
+features="$(printf '%s\n' "$provides" | tr ';' '\n' | sed 's/^openkal\.//' | grep -vxE 'abort|stream|memory' | paste -sd, -)"
+echo "features: $features"
+mcpp build --target i686-svr4-musl --features "$features"
 binary="$(find "$PWD/target" -type f -name openkal-conformance | head -1)"
 [ -n "$binary" ] || { echo "the suite was not produced" >&2; exit 2; }
+if [ "$mode" = kernel ]; then
+  # The program runs in /tmp/dirun of the guest, a directory it may write, as `./openkal-conformance':
+  # the copy it starts of itself is found beside it.
+  "$dirun" --profile "$image/dirun.toml" --emulator "$qemu" --accel tcg --timeout 1800 \
+    --env OPENKAL_CONFORMANCE_EMPTY= --env "OPENKAL_CONFORMANCE_PROVIDES=$provides" -- "$binary"
+  exit
+fi
 export OPENKAL_CONFORMANCE_EMPTY=""
-export OPENKAL_CONFORMANCE_PROVIDES="$(awk '/^[[:space:]]*provides-interfaces[[:space:]]*=/ {on=1} on {line=line $0; if ($0 ~ /\]/) on=0} END {gsub(/.*\[/,"",line); gsub(/\].*/,"",line); gsub(/[" \t]/,"",line); gsub(/,$/,"",line); gsub(/,/,";",line); print line}' "$here/mcpp.toml")"
+export OPENKAL_CONFORMANCE_PROVIDES="$provides"
 mkdir run && cd run
 unshare -Ur "$ibcs" ${interface:+-p "$interface"} "$binary"

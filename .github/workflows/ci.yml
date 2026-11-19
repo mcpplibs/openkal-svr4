@@ -11,9 +11,13 @@ name: CI
 #                made, and the number of observations that held is the same under the three.
 #   programs     examples/hello through `mcpp run', unoptimised and optimised: its arguments,
 #                an exception across a frame, files made, renamed, listed and removed, status 7.
+#   kernel       the same suite on the System V kernel: AT&T UNIX System V/386 Release 4.0
+#                Version 3.0 in QEMU's translator, from xim's svr4-disk-image (TECHNICAL
+#                VERIFICATION ONLY: the system is proprietary), booted by dirun
+#                (tools/run-conformance.sh --kernel). It conforms in every observation made.
 #
-# The runs are under an emulation of the interface on Linux x86_64 (README, "Where it was
-# run"); none is on a System V kernel.
+# The first two run under an emulation of the interface on Linux x86_64, the third on the
+# system's own kernel (README, "Where it was run").
 
 on:
   push:
@@ -25,8 +29,8 @@ env:
   XLINGS_VERSION: v2026.10.26.1
   XLINGS_NON_INTERACTIVE: '1'
   MCPP_VERSION: 2026.11.18.1
-  IBCS_US_VERSION: 4.3-1
-  IBCS_US_SHA256: 4dd3d690b4f397e8a3f11162d9de0db7e03c117b1a4410241e7d01adabb82409
+  IBCS_US_VERSION: 4.3-2
+  IBCS_US_SHA256: 23d3ea7ed809a207d17e1c465e74c8f09c08b74a6b029beb0c0ea38ead72aab3
 
 jobs:
   row:
@@ -92,3 +96,44 @@ jobs:
           program="$(find "$PWD/target/i686-svr4-musl" -path '*bin/hello' -type f | head -1)"
           mkdir -p "$RUNNER_TEMP/elsewhere/a/b"
           (cd "$RUNNER_TEMP/elsewhere/a/b" && env -u PWD unshare -Ur "$IBCS_US" "$program" > out.txt || true; cat out.txt; grep -qx 'here: absolute' out.txt)
+
+  kernel:
+    name: i686-svr4-musl (built on Linux x86_64, run on the System V kernel)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mcpp-community/setup-mcpp@v1
+        with:
+          version: ${{ env.MCPP_VERSION }}
+          xlings-version: ${{ env.XLINGS_VERSION }}
+          toolchains: llvm 23.1.3
+      # The machine: dirun, the image (technical verification only; its install prints the
+      # notice) and the emulator, from xim. QEMU translates (TCG): under KVM on this runner the
+      # kernel stopped while it booted.
+      - name: dirun, svr4-disk-image and QEMU
+        run: |
+          command -v xlings >/dev/null || export PATH="$HOME/.xlings/bin:$PATH"
+          xlings install dirun@0.8.0 svr4-disk-image@4.0.3-20261119 qemu-x86@9.2.4-1
+          pkgs="$HOME/.xlings/data/xpkgs"
+          echo "DIRUN=$pkgs/xim-x-dirun/0.8.0/bin/dirun" >> "$GITHUB_ENV"
+          echo "SVR4_IMAGE=$pkgs/xim-x-svr4-disk-image/4.0.3-20261119" >> "$GITHUB_ENV"
+          echo "QEMU=$pkgs/xim-x-qemu-x86/9.2.4-1/bin/qemu-system-x86_64" >> "$GITHUB_ENV"
+          ls -l "$pkgs/xim-x-dirun/0.8.0/bin/dirun" "$pkgs/xim-x-svr4-disk-image/4.0.3-20261119/svr4.qcow2" \
+                "$pkgs/xim-x-qemu-x86/9.2.4-1/bin/qemu-system-x86_64"
+      - name: The specification, the C library and the C++ run-time
+        run: |
+          branch="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+          for repo in openkal openkal-musl openkal-llvm-runtime; do
+            if git ls-remote --exit-code --heads "https://github.com/mcpplibs/$repo.git" "$branch" >/dev/null 2>&1; then ref="$branch"; else ref=main; fi
+            echo "$repo at $ref"
+            git clone --quiet --depth 1 --branch "$ref" "https://github.com/mcpplibs/$repo.git" ".$repo"
+          done
+          mv .openkal .spec
+          bash tools/row.sh "$RUNNER_TEMP/row" .openkal-musl .openkal-llvm-runtime
+      - name: Conformance on the System V kernel
+        run: |
+          bash tools/run-conformance.sh .spec "$RUNNER_TEMP/row" --kernel "$DIRUN" "$SVR4_IMAGE" "$QEMU" | tee kernel.log
+          grep -q '^the implementation conforms in every observation made' kernel.log \
+            || { echo "::error::the suite does not conform on the System V kernel"; exit 1; }
+          { echo "### openkal-svr4 conformance on the System V kernel (Release 4.0 Version 3.0, QEMU)"; echo '```'; grep -E '^observations|DID NOT HOLD|^the implementation' kernel.log | sort -u; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

@@ -81,7 +81,7 @@ extern "C" {
 kal_u64 kal_version(void) { return KAL_VERSION; }
 kal_u64 kal_interfaces(void) {
     return KAL_IFACE_ABORT | KAL_IFACE_STREAM | KAL_IFACE_MEMORY | KAL_IFACE_ENV
-         | KAL_IFACE_TIME | KAL_IFACE_FS | KAL_IFACE_TERMINAL;
+         | KAL_IFACE_TIME | KAL_IFACE_FS | KAL_IFACE_TERMINAL | KAL_IFACE_PROCESS | KAL_IFACE_SPACE;
 }
 
 // ====================================================================== abort
@@ -165,7 +165,14 @@ kal_intptr kal_env_var_at(kal_uintptr i, char* out, kal_uintptr cap) {
 kal_intptr kal_env_image(char*, kal_uintptr) { return -kal_err_not_found; }
 kal_intptr kal_env_loader(char*, kal_uintptr) { return -kal_err_not_found; }
 kal_intptr kal_env_system(char* out, kal_uintptr cap) { return oks::put("svr4", 4, out, cap); }
-int kal_env_resources(void) { return KAL_RESOURCES_BALANCED; }
+// THE RESOURCE PREFERENCE (openkal 0.23), which a start conveys in KAL_RESOURCES, as the other
+// implementations convey it: `performance', `economy', or balanced (src/process.cpp).
+int kal_env_resources(void) {
+    const char* v = oks::variable("KAL_RESOURCES", 13);
+    if (!v) return KAL_RESOURCES_BALANCED;
+    auto is = [&](const char* w) { unsigned long k = 0; while (w[k] && v[k] == w[k]) ++k; return !w[k] && !v[k]; };
+    return is("performance") ? KAL_RESOURCES_PERFORMANCE : is("economy") ? KAL_RESOURCES_ECONOMY : KAL_RESOURCES_BALANCED;
+}
 
 // ======================================================================= time
 //

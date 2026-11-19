@@ -1,31 +1,41 @@
-// openkal.process on `fork', `execve', `wait' and `kill'.
+// openkal.process on `fork', `execve', `wait' and `kill', and openkal.space on
+// `fork' alone.
 //
-// NOT BUILT, AND NOT CLAIMED, IN 0.1 (mcpp.toml: the interface is absent from
-// the list and this file from the sources). What is here was run where the
-// interface is emulated on another kernel: a pipe, a second program and its
-// ending hold there, and the replacement of an image does not --- that host
-// starts the file as its own kind of program, outside the emulation --- so the
-// suite's observations of a started program cannot be made. The file is kept
-// for the system itself, where they can; until then no name of the interface
-// is defined (openkal clause 6.1).
-#include "../common.h"
+// CLAIMED FROM 0.3. Until 0.2 the file was kept and not built: it had been run
+// only where the interface is emulated on another kernel, and there the
+// replacement of an image left the emulation (ibcs-us handed `execve' to
+// Linux, which started the file as its own kind of program), so the suite's
+// observations of a started program could not be made. They are made now on
+// the system itself (AT&T UNIX System V/386 Release 4.0 Version 3.0, in QEMU)
+// and under ibcs-us 4.3-2, where a program of the interface that replaces its
+// image stays in the emulation (README, "Where it was run").
+#include "common.h"
+#include <openkal/space.h>
 
 namespace {
 using oks::word;
 
 // THE PROGRAMS THIS ONE STARTED. `wait' answers for whichever ended, so an
 // ending is recorded here until the program that started it asks.
-struct started { int pid; bool used; bool ended; int status; };
+struct started { int pid; bool used; bool ended; int status; kal_u64 cpu_ns; };
 constexpr int kStarted = 64;
 started g_started[kStarted];
+// THIS PROGRAM'S OWN HANDLE (kal_process_self): past the table, so that wait and terminate,
+// which look a handle up there, refuse it with kal_err_invalid, as openkal/process.h asks.
+constexpr kal_uintptr kSelf = kStarted + 1;
+
+// Processor time, from `times': the clock's ticks in nanoseconds.
+kal_u64 ticks_ns(long ticks) { return static_cast<kal_u64>(ticks < 0 ? 0 : ticks) * (1000000000ull / oks::HZ); }
 
 started* of(kal_process p) {
     if (p.h == 0 || p.h > static_cast<kal_uintptr>(kStarted)) return nullptr;
     started* s = &g_started[p.h - 1];
     return s->used ? s : nullptr;
 }
-void record(int pid, int status) {
-    for (auto& s : g_started) if (s.used && !s.ended && s.pid == pid) { s.ended = true; s.status = status; return; }
+// An ending, and the processor time it used: what the children's times grew by across the
+// `wait' that collected it (the kernel adds a child's times when it is collected).
+void record(int pid, int status, kal_u64 cpu_ns) {
+    for (auto& s : g_started) if (s.used && !s.ended && s.pid == pid) { s.ended = true; s.status = status; s.cpu_ns = cpu_ns; return; }
 }
 
 // One block holding a vector of terminated strings: openkal's are bytes and a length.
@@ -42,6 +52,37 @@ char** vector_of(const char** v, const kal_uintptr* lens, kal_uintptr n, kal_uin
     }
     out[n] = nullptr;
     *size = bytes;
+    return out;
+}
+
+// The environment a start gives: the one given (or this program's, `given' null), with the
+// preference in place of the caller's KAL_RESOURCES.
+char** with_preference(const char** given, const kal_uintptr* lens, kal_uintptr n, const char* pref, kal_uintptr* size) {
+    kal_uintptr count = 0;
+    if (given) count = n; else for (char** e = oks::g_envp; e && *e; ++e) ++count;
+    const kal_uintptr vbytes = (count + 1) * sizeof(const char*), lbytes = (count + 1) * sizeof(kal_uintptr);
+    auto** v = static_cast<const char**>(kal_alloc(vbytes, alignof(const char*)));
+    auto* l = static_cast<kal_uintptr*>(kal_alloc(lbytes, alignof(kal_uintptr)));
+    if (!v || !l) {
+        if (v) kal_free(v, vbytes, alignof(const char*));
+        if (l) kal_free(l, lbytes, alignof(kal_uintptr));
+        return nullptr;
+    }
+    kal_uintptr k = 0;
+    auto drop = [&](const char* e, kal_uintptr len) {
+        const char* key = "KAL_RESOURCES="; kal_uintptr i = 0;
+        while (i < 14 && i < len && e[i] == key[i]) ++i;
+        return pref && i == 14;
+    };
+    for (kal_uintptr i = 0; i < count; ++i) {
+        const char* e = given ? given[i] : oks::g_envp[i];
+        const kal_uintptr len = given ? lens[i] : oks::length(e);
+        if (!drop(e, len)) { v[k] = e; l[k] = len; ++k; }
+    }
+    if (pref) { v[k] = pref; l[k] = oks::length(pref); ++k; }
+    char** out = vector_of(v, l, k, size);
+    kal_free(v, vbytes, alignof(const char*));
+    kal_free(l, lbytes, alignof(kal_uintptr));
     return out;
 }
 
@@ -73,7 +114,7 @@ extern "C" {
 
 kal_uintptr kal_process_props(void) {
     return KAL_PROCESS_PROP_TERMINATE | KAL_PROCESS_PROP_STREAM_PASSING | KAL_PROCESS_PROP_EXIT_STATUS
-         | KAL_PROCESS_PROP_NULL_STREAMS | KAL_PROCESS_PROP_JOB;
+         | KAL_PROCESS_PROP_CHANNEL | KAL_PROCESS_PROP_NULL_STREAMS | KAL_PROCESS_PROP_JOB;
 }
 
 int kal_process_spawn(const kal_spawn* how, const char* path, kal_uintptr path_len,
@@ -89,6 +130,13 @@ int kal_process_spawn(const kal_spawn* how, const char* path, kal_uintptr path_l
         for (int i = 0; i < 3; ++i) if (placed[i] && (how->flags & nulls[i])) return kal_err_invalid;
     }
     if ((argc && (!argv || !argv_lens)) || (envc && (!envp || !envp_lens))) return kal_err_invalid;
+    // THE RESOURCE PREFERENCE (openkal 0.23): one at most, conveyed in KAL_RESOURCES in place of
+    // the caller's; none, and the started program has the caller's.
+    const kal_uintptr prefs = how->flags & (KAL_SPAWN_RESOURCES_BALANCED | KAL_SPAWN_RESOURCES_PERFORMANCE | KAL_SPAWN_RESOURCES_ECONOMY);
+    if (prefs & (prefs - 1)) return kal_err_invalid;
+    const char* pref = prefs == KAL_SPAWN_RESOURCES_PERFORMANCE ? "KAL_RESOURCES=performance"
+                     : prefs == KAL_SPAWN_RESOURCES_ECONOMY     ? "KAL_RESOURCES=economy"
+                     : prefs == KAL_SPAWN_RESOURCES_BALANCED    ? "KAL_RESOURCES=balanced" : nullptr;
     if (!oks::dir_path(how->work)) return kal_err_invalid;
 
     // The program, named beneath `base': a start that cannot happen is reported
@@ -107,7 +155,8 @@ int kal_process_spawn(const kal_spawn* how, const char* path, kal_uintptr path_l
 
     kal_uintptr av_size = 0, ev_size = 0;
     char** av = vector_of(argv, argv_lens, argc, &av_size);
-    char** ev = (envc == 0 && !envp) ? oks::g_envp : vector_of(envp, envp_lens, envc, &ev_size);
+    char** ev = (envc == 0 && !envp && !pref) ? oks::g_envp
+              : with_preference(envc == 0 && !envp ? nullptr : envp, envp_lens, envc, pref, &ev_size);
     auto release = [&] {
         if (av) kal_free(av, av_size, alignof(char*));
         if (ev && ev != oks::g_envp) kal_free(ev, ev_size, alignof(char*));
@@ -152,7 +201,7 @@ int kal_process_spawn(const kal_spawn* how, const char* path, kal_uintptr path_l
         }
         oks::call(oks::nr::close, report[0]);
     }
-    *slot = started{ pid, true, false, 0 };
+    *slot = started{ pid, true, false, 0, 0 };
     if (why != 0) {
         kal_process gone{ index + 1 };
         int status = 0, terminated = 0;
@@ -169,11 +218,19 @@ int kal_process_wait(kal_process p, int* status, int* terminated) {
     started* s = of(p);
     if (!s) return kal_err_invalid;
     while (!s->ended) {
-        // The identifier in the first result, the status in the second.
-        const auto r = oks::call(oks::nr::wait, 0);
+        oks::ktms before{}, after{};
+        oks::call(oks::nr::times, oks::arg(&before));
+        // The identifier in the first result, the status in the second. The
+        // system's kernel takes no argument and answers in the second result;
+        // ibcs-us answers there only when it is given a place for the status
+        // as well (a C library's `wait(&status)' gives one), so one is given.
+        int place = 0;
+        const auto r = oks::call(oks::nr::wait, oks::arg(&place));
         if (r.error == oks::EINTR) continue;
         if (r.failed()) return oks::translate(r.error);
-        record(static_cast<int>(r.value), static_cast<int>(r.second));
+        oks::call(oks::nr::times, oks::arg(&after));
+        record(static_cast<int>(r.value), static_cast<int>(r.second),
+               ticks_ns((after.cutime + after.cstime) - (before.cutime + before.cstime)));
     }
     const int low = s->status & 0177;
     if (status) *status = low ? 128 + low : (s->status >> 8) & 0377;
@@ -188,6 +245,35 @@ int kal_process_terminate(kal_process p) {
     return r.failed() && r.error != oks::ESRCH ? oks::translate(r.error) : kal_ok;
 }
 void kal_process_close(kal_process p) { if (started* s = of(p)) s->used = false; }
+
+// openkal.space: A CONTEXT IN A COPY OF THE CALLER'S SPACE IS `fork' WITH A
+// FUNCTION TO RUN. The copy is the kernel's own, of memory and of handles alike;
+// the started context runs on its copy of the caller's stack, so the stack the
+// caller provides is not needed (openkal/space.h allows this), and returning
+// from `entry' ends it with status 0. It is a process: kal_process_wait,
+// kal_process_terminate and kal_process_close apply, through the same table as
+// a started program. The handles are copied with the memory. Whether a store to
+// the copy can fail after the call is the environment's: the row runs on the
+// system's kernel and under ibcs-us, whose copy is Linux's, which completes it
+// lazily; so the word says that it may.
+int kal_space_start(void (*entry)(void*), void* arg, void*, kal_process* out) {
+    if (!entry || !out) return kal_err_invalid;
+    started* slot = nullptr; kal_uintptr index = 0;
+    for (int i = 0; i < kStarted && !slot; ++i) if (!g_started[i].used) { slot = &g_started[i]; index = static_cast<kal_uintptr>(i); }
+    if (!slot) return kal_err_no_memory;
+    const auto f = oks::call(oks::nr::fork);
+    if (f.failed()) return oks::translate(f.error);
+    // The started context: a non-zero second result on the system itself; a
+    // zero first result where a host emulates the interface and clears the second.
+    if (f.second != 0 || f.value == 0) {
+        entry(arg);
+        for (;;) oks::call(oks::nr::exit, 0);
+    }
+    *slot = started{ static_cast<int>(f.value), true, false, 0, 0 };
+    *out = kal_process{ index + 1 };
+    return kal_ok;
+}
+kal_uintptr kal_space_props(void) { return KAL_SPACE_PROP_CLONE_HANDLES | KAL_SPACE_PROP_DEFERRED_COPY; }
 
 // A JOB IS A PROCESS GROUP (`pgrpsys', whose fifth function is setpgid): a
 // program that enters one with a zero handle forms it and is its leader.
@@ -211,12 +297,57 @@ int kal_process_job_observe(kal_job, const char*, kal_uintptr, kal_u32*) { retur
 int kal_process_job_retire(kal_job, const char*, kal_uintptr, const kal_program_identity*, kal_u32*) { return kal_err_not_supported; }
 int kal_process_job_usage(kal_job, kal_job_usage*) { return kal_err_not_supported; }
 int kal_process_job_limit(kal_job, kal_uintptr, kal_u64) { return kal_err_not_supported; }
-int kal_process_channel(kal_stream*, kal_stream*) { return kal_err_not_supported; }
-void kal_process_channel_close(kal_stream) {}
+// A CHANNEL IS A PIPE: `mine' the end that reads, `theirs' the end that writes (openkal 0.17).
+// The system's pipe is a STREAMS pipe whose two ends both read and write; ibcs-us's is Linux's,
+// whose first end reads. Each is closed in a started program unless it is placed there.
+int kal_process_channel(kal_stream* mine, kal_stream* theirs) {
+    if (!mine || !theirs) return kal_err_invalid;
+    const auto pp = oks::call(oks::nr::pipe);
+    if (pp.failed()) return oks::translate(pp.error);
+    const int r = static_cast<int>(pp.value), w = static_cast<int>(pp.second);
+    oks::close_on_exec(r); oks::close_on_exec(w);
+    *mine = kal_stream{ oks::pack(r) }; *theirs = kal_stream{ oks::pack(w) };
+    return kal_ok;
+}
+void kal_process_channel_close(kal_stream s) { const int fd = oks::unpack(s.h); if (fd >= 0) oks::call(oks::nr::close, fd); }
+// No request to end reaches a program here (the property is not claimed), so there is none
+// whose manner could be reproduced (openkal/process.h).
 const kal_u32* kal_process_stop_requested(void) { static const kal_u32 never = 0; return &never; }
-int kal_process_end_as_requested(void) { return kal_err_not_supported; }
-int kal_process_self(kal_process*) { return kal_err_not_supported; }
+int kal_process_end_as_requested(void) { return kal_err_invalid; }
+int kal_process_self(kal_process* out) {
+    if (!out) return kal_err_invalid;
+    *out = kal_process{ kSelf };
+    return kal_ok;
+}
 int kal_process_open_id(kal_u64, kal_process*) { return kal_err_not_supported; }
-int kal_process_info(kal_process, kal_u32, kal_program_info*) { return kal_err_not_supported; }
+// WHAT IS KNOWN OF A PROGRAM: its identifier (the process's), whether it has ended, and the
+// processor time it used --- this program's own from `times', a started program's once it was
+// collected. Its start and its memory are not known to these systems' calls.
+int kal_process_info(kal_process p, kal_u32 wanted, kal_program_info* out) {
+    if (!out || out->self_size < 8) return kal_err_invalid;
+    kal_program_info info{};
+    info.self_size = out->self_size;
+    if (p.h == kSelf) {
+        oks::ktms t{};
+        oks::call(oks::nr::times, oks::arg(&t));
+        info.id = static_cast<kal_u64>(oks::call(oks::nr::getpid).value);
+        info.cpu_ns = ticks_ns(t.utime + t.stime);
+        info.ended = 0;
+        info.present = KAL_PINFO_ID | KAL_PINFO_CPU | KAL_PINFO_ENDED;
+    } else if (started* s = of(p)) {
+        info.id = static_cast<kal_u64>(s->pid);
+        info.ended = s->ended ? 1 : 0;
+        info.cpu_ns = s->cpu_ns;
+        info.present = KAL_PINFO_ID | KAL_PINFO_ENDED | (s->ended ? KAL_PINFO_CPU : 0);
+    } else {
+        return kal_err_invalid;
+    }
+    info.present &= wanted;
+    const kal_uintptr n = out->self_size < sizeof info ? out->self_size : sizeof info;
+    const unsigned char* from = reinterpret_cast<const unsigned char*>(&info);
+    unsigned char* to = reinterpret_cast<unsigned char*>(out);
+    for (kal_uintptr i = 0; i < n; ++i) to[i] = from[i];
+    return kal_ok;
+}
 
 }  // extern "C"
